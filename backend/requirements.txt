@@ -8,3 +8,6 @@ requests
 chromadb
 pydantic
 groq
+PyMuPDF
+python-docx
+youtube-transcript-api
