@@ -5,11 +5,14 @@ import io
 def parse_pdf(file_bytes: bytes) -> str:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     text = ""
-    for page_num, page in enumerate(doc):
-        if page_num >= 50:  # Limit to first 50 pages
-            text += "\n[Document truncated at 50 pages for processing]"
-            break
-        text += page.get_text()
+    try:
+        for page_num, page in enumerate(doc):
+            if page_num >= 50:  # Limit to first 50 pages
+                text += "\n[Document truncated at 50 pages for processing]"
+                break
+            text += page.get_text("text")
+    finally:
+        doc.close()
     return text.strip()
 
 def parse_docx(file_bytes: bytes) -> str:
@@ -18,4 +21,7 @@ def parse_docx(file_bytes: bytes) -> str:
     return text.strip()
 
 def parse_txt(file_bytes: bytes) -> str:
-    return file_bytes.decode("utf-8", errors="ignore").strip()
+    try:
+        return file_bytes.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return file_bytes.decode("latin-1", errors="ignore").strip()

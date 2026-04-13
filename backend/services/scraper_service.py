@@ -1,6 +1,9 @@
 import requests
 from bs4 import BeautifulSoup
 import random
+from urllib.parse import urlparse
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 HEADERS_LIST = [
     {
@@ -19,11 +22,35 @@ HEADERS_LIST = [
     }
 ]
 
+def normalize_url(url: str) -> str:
+    cleaned = url.strip()
+    if not cleaned:
+        raise Exception("URL is empty")
+    parsed = urlparse(cleaned)
+    if not parsed.scheme:
+        cleaned = f"https://{cleaned}"
+    return cleaned
+
+
+def build_session(headers: dict) -> requests.Session:
+    session = requests.Session()
+    session.headers.update(headers)
+    retries = Retry(
+        total=2,
+        backoff_factor=0.5,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "HEAD"],
+    )
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
 def scrape_with_requests(url: str) -> dict:
     """Primary scraper — direct HTTP request"""
     headers = random.choice(HEADERS_LIST)
-    session = requests.Session()
-    session.headers.update(headers)
+    session = build_session(headers)
 
     response = session.get(url, timeout=15, allow_redirects=True)
     response.raise_for_status()
@@ -62,7 +89,8 @@ def scrape_with_jina(url: str) -> dict:
         "X-Return-Format": "text",
     }
 
-    response = requests.get(jina_url, headers=headers, timeout=30)
+    session = build_session(headers)
+    response = session.get(jina_url, timeout=30)
     response.raise_for_status()
 
     content = response.text.strip()
@@ -87,10 +115,12 @@ def scrape_url(url: str) -> dict:
     1. Try direct HTTP scraping first
     2. Fall back to Jina AI Reader if that fails
     """
+    normalized_url = normalize_url(url)
+
     # Step 1 — Try direct scraping
     try:
-        print(f"[Scraper] Trying direct scrape: {url}")
-        result = scrape_with_requests(url)
+        print(f"[Scraper] Trying direct scrape: {normalized_url}")
+        result = scrape_with_requests(normalized_url)
         print(f"[Scraper] ✅ Direct scrape successful: {result['title']}")
         return result
     except Exception as e:
@@ -98,7 +128,7 @@ def scrape_url(url: str) -> dict:
 
     # Step 2 — Fall back to Jina AI
     try:
-        result = scrape_with_jina(url)
+        result = scrape_with_jina(normalized_url)
         print(f"[Scraper] ✅ Jina AI scrape successful: {result['title']}")
         return result
     except Exception as e:

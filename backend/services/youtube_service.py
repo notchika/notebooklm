@@ -15,16 +15,36 @@ def extract_video_id(url: str) -> str:
 
 def get_youtube_transcript(url: str) -> dict:
     video_id = extract_video_id(url)
-    
-    try:
-        # New API style
-        ytt = YouTubeTranscriptApi()
-        transcript_list = ytt.fetch(video_id)
-        full_text = " ".join([entry.text for entry in transcript_list])
-    except Exception:
-        # Fallback to old API style
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-        full_text = " ".join([entry["text"] for entry in transcript_list])
+
+    ytt = YouTubeTranscriptApi()
+    last_error = None
+
+    # Try several language strategies before failing.
+    transcript_candidates = [
+        ("en",),
+        ("en-US", "en-GB", "en"),
+        ("en", "fr", "es", "de"),
+    ]
+
+    for languages in transcript_candidates:
+        try:
+            fetched_transcript = ytt.fetch(video_id, languages=languages)
+            full_text = " ".join(
+                snippet.text.strip()
+                for snippet in fetched_transcript
+                if getattr(snippet, "text", "").strip()
+            ).strip()
+            if full_text:
+                break
+        except Exception as e:
+            last_error = e
+            full_text = ""
+    else:
+        raise Exception(
+            f"Unable to fetch transcript for video {video_id}. "
+            f"The video may not have captions enabled, may be restricted, or may block transcript access. "
+            f"Details: {last_error}"
+        )
 
     return {
         "title": f"YouTube Video ({video_id})",

@@ -84,15 +84,20 @@ async def add_file_source(
 ):
     file_bytes = await file.read()
     filename = file.filename or "Untitled"
-    extension = filename.split(".")[-1].lower()
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     try:
         if extension == "pdf":
             content = parse_pdf(file_bytes)
             title = filename.replace(".pdf", "")
-        elif extension in ["docx", "doc"]:
+        elif extension == "docx":
             content = parse_docx(file_bytes)
-            title = filename.replace(".docx", "").replace(".doc", "")
+            title = filename.replace(".docx", "")
+        elif extension == "doc":
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported file type: .doc. Please convert to .docx and upload again."
+            )
         elif extension == "txt":
             content = parse_txt(file_bytes)
             title = filename.replace(".txt", "")
