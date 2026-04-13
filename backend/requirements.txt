@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-dotenv
+httpx
+beautifulsoup4
+requests
+chromadb
+pydantic
+groq

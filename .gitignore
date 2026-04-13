@@ -1,0 +1,5 @@
+# Root-level ignores (frontend/ and backend/ have their own .gitignore too)
+.DS_Store
+.env
+.env.*
+!.env.example
