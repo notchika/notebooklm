@@ -23,7 +23,13 @@ async def process_and_store(
 ):
     source_id = str(uuid.uuid4())
     chunks = chunk_text(content)
-    await add_chunks(notebook_id, source_id, chunks)
+    chunks_stored = 0
+    try:
+        await add_chunks(notebook_id, source_id, chunks)
+        chunks_stored = len(chunks)
+    except Exception as e:
+        # Source should still be stored even when vector indexing fails.
+        print(f"[Sources] Vector indexing failed for {source_id}: {str(e)}")
 
     try:
         summary = await generate_summary(content)
@@ -42,7 +48,7 @@ async def process_and_store(
         "source_id": source_id,
         "title": title,
         "summary": summary,
-        "chunks_stored": len(chunks)
+        "chunks_stored": chunks_stored
     }
 
 # ── URL Source ─────────────────────────────────────────

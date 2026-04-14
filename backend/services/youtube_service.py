@@ -1,5 +1,7 @@
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.proxies import GenericProxyConfig
 import re
+import os
 
 def extract_video_id(url: str) -> str:
     patterns = [
@@ -16,35 +18,50 @@ def extract_video_id(url: str) -> str:
 def get_youtube_transcript(url: str) -> dict:
     video_id = extract_video_id(url)
 
-    ytt = YouTubeTranscriptApi()
-    last_error = None
+    def fetch_text(api: YouTubeTranscriptApi) -> str:
+        last_error = None
+        transcript_candidates = [
+            ("en",),
+            ("en-US", "en-GB", "en"),
+            ("en", "fr", "es", "de"),
+        ]
+        for languages in transcript_candidates:
+            try:
+                fetched_transcript = api.fetch(video_id, languages=languages)
+                text = " ".join(
+                    snippet.text.strip()
+                    for snippet in fetched_transcript
+                    if getattr(snippet, "text", "").strip()
+                ).strip()
+                if text:
+                    return text
+            except Exception as e:
+                last_error = e
+        raise last_error or Exception("Unknown transcript fetch error")
 
-    # Try several language strategies before failing.
-    transcript_candidates = [
-        ("en",),
-        ("en-US", "en-GB", "en"),
-        ("en", "fr", "es", "de"),
-    ]
-
-    for languages in transcript_candidates:
-        try:
-            fetched_transcript = ytt.fetch(video_id, languages=languages)
-            full_text = " ".join(
-                snippet.text.strip()
-                for snippet in fetched_transcript
-                if getattr(snippet, "text", "").strip()
-            ).strip()
-            if full_text:
-                break
-        except Exception as e:
-            last_error = e
-            full_text = ""
-    else:
-        raise Exception(
-            f"Unable to fetch transcript for video {video_id}. "
-            f"The video may not have captions enabled, may be restricted, or may block transcript access. "
-            f"Details: {last_error}"
-        )
+    # 1) Try without proxy first.
+    try:
+        full_text = fetch_text(YouTubeTranscriptApi())
+    except Exception as direct_error:
+        # 2) Optional: retry via proxy if configured.
+        proxy_url = os.getenv("YOUTUBE_PROXY_URL") or os.getenv("PROXY_URL")
+        if proxy_url:
+            proxy_config = GenericProxyConfig(http_url=proxy_url, https_url=proxy_url)
+            try:
+                full_text = fetch_text(YouTubeTranscriptApi(proxy_config=proxy_config))
+            except Exception as proxied_error:
+                raise Exception(
+                    f"Unable to fetch transcript for video {video_id}. "
+                    f"Direct error: {direct_error}. Proxied error: {proxied_error}. "
+                    f"If you're running on a cloud host, you may need a working proxy."
+                )
+        else:
+            raise Exception(
+                f"Unable to fetch transcript for video {video_id}. "
+                f"This is commonly caused by cloud IP blocking or missing captions. "
+                f"Details: {direct_error}. "
+                f"To retry via proxy, set YOUTUBE_PROXY_URL in the backend environment."
+            )
 
     return {
         "title": f"YouTube Video ({video_id})",

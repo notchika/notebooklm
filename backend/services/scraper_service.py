@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 import random
+import os
 from urllib.parse import urlparse
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -117,23 +118,32 @@ def scrape_url(url: str) -> dict:
     """
     normalized_url = normalize_url(url)
 
-    # Step 1 — Try direct scraping
-    try:
-        print(f"[Scraper] Trying direct scrape: {normalized_url}")
-        result = scrape_with_requests(normalized_url)
-        print(f"[Scraper] ✅ Direct scrape successful: {result['title']}")
-        return result
-    except Exception as e:
-        print(f"[Scraper] ⚠️ Direct scrape failed: {str(e)} — trying Jina AI fallback")
+    is_cloud = os.getenv("RENDER") is not None or os.getenv("IS_CLOUD", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
-    # Step 2 — Fall back to Jina AI
-    try:
-        result = scrape_with_jina(normalized_url)
-        print(f"[Scraper] ✅ Jina AI scrape successful: {result['title']}")
-        return result
-    except Exception as e:
-        print(f"[Scraper] ❌ Jina AI fallback also failed: {str(e)}")
-        raise Exception(
-            f"Could not extract content from this URL using any method. "
-            f"The site may be fully paywalled or inaccessible. Details: {str(e)}"
-        )
+    # Prefer Jina first on cloud (often more reliable), but still fall back to direct.
+    strategies = (
+        [scrape_with_jina, scrape_with_requests]
+        if is_cloud
+        else [scrape_with_requests, scrape_with_jina]
+    )
+
+    last_error = None
+    for strategy in strategies:
+        try:
+            label = "Jina AI" if strategy == scrape_with_jina else "direct"
+            print(f"[Scraper] Trying {label} scrape: {normalized_url}")
+            result = strategy(normalized_url)
+            print(f"[Scraper] ✅ {label} scrape successful: {result['title']}")
+            return result
+        except Exception as e:
+            last_error = e
+            print(f"[Scraper] ⚠️ {strategy.__name__} failed: {str(e)}")
+
+    raise Exception(
+        f"Could not extract content from this URL using any method. "
+        f"The site may be fully paywalled or inaccessible. Details: {str(last_error)}"
+    )
