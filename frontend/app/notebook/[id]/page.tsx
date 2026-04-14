@@ -66,10 +66,22 @@ export default function NotebookPage() {
       setShowAddSource(false);
       toast.success("Source added successfully!");
     } catch (error: any) {
-      toast.error(
+      const detail =
         error?.response?.data?.detail ||
-          "Failed to add source — site may be blocking scrapers"
-      );
+        (typeof error?.response?.data === "string" ? error.response.data : "") ||
+        error?.message ||
+        "";
+      const isYouTubeUrl = /youtube\.com|youtu\.be/i.test(url);
+      const isYouTubeBlocked =
+        /youtube.*blocking|cloud host|proxy|transcript/i.test(detail);
+
+      if (isYouTubeUrl && isYouTubeBlocked) {
+        toast.error(
+          "YouTube transcript is blocked on hosted IPs. Try another video with captions, configure a residential rotating proxy, or upload transcript text/PDF."
+        );
+      } else {
+        toast.error(detail || "Failed to add source — site may be blocking scrapers");
+      }
     } finally {
       setIsAddingSource(false);
     }
@@ -83,9 +95,12 @@ export default function NotebookPage() {
     setShowAddSource(false);
     toast.success("File added successfully!");
   } catch (error: any) {
-    toast.error(
-      error?.response?.data?.detail || "Failed to process file"
-    );
+    const detail =
+      error?.response?.data?.detail ||
+      (typeof error?.response?.data === "string" ? error.response.data : "") ||
+      error?.message ||
+      "Failed to process file";
+    toast.error(detail);
   } finally {
     setIsAddingSource(false);
    }

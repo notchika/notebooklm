@@ -89,6 +89,13 @@ async def add_file_source(
     file: UploadFile = File(...)
 ):
     file_bytes = await file.read()
+    max_size_bytes = 10 * 1024 * 1024  # 10MB
+    if len(file_bytes) > max_size_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="File is too large. Please upload files up to 10MB."
+        )
+
     filename = file.filename or "Untitled"
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
