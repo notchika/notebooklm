@@ -5,7 +5,8 @@ const API_BASE = "https://notebooklm-api-blhk.onrender.com";
 const api = axios.create({
   baseURL: API_BASE,
   headers: {
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
+    "ngrok-skip-browser-warning": "true"
   },
 });
 
