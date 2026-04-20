@@ -1,12 +1,12 @@
 import axios from "axios";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ||
-  "http://localhost:8080";
+const API_BASE = "https://notebooklm-api-blhk.onrender.com";
 
 const api = axios.create({
   baseURL: API_BASE,
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json"
+  },
 });
 
 // Notebooks

@@ -6,19 +6,10 @@ import os
 
 app = FastAPI(title="NotebookLM Clone", version="1.0.0")
 
-cors_allowed_origins = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
-allowed_origins = [
-    origin.strip()
-    for origin in cors_allowed_origins.split(",")
-    if origin.strip()
-]
-allow_origin_regex = os.getenv("CORS_ALLOW_ORIGIN_REGEX")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_origin_regex=allow_origin_regex,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
