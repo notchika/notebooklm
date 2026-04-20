@@ -11,7 +11,7 @@ groq
 PyMuPDF
 python-docx
 youtube-transcript-api
-pinecone-client
+pinecone
 supabase
 psycopg2-binary
 huggingface-hub
