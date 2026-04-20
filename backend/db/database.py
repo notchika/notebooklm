@@ -1,14 +1,19 @@
-import sqlite3
 import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
 
-DB_PATH = "notebooklm.db"
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    """Get PostgreSQL connection via Supabase"""
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     return conn
 
 def init_db():
+    """Create tables if they don't exist"""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -16,32 +21,34 @@ def init_db():
         CREATE TABLE IF NOT EXISTS notebooks (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
 
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS sources (
-        id TEXT PRIMARY KEY,
-        notebook_id TEXT NOT NULL,
-        url TEXT,
-        title TEXT,
-        content TEXT,
-        summary TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (notebook_id) REFERENCES notebooks(id)
-    )
-""")
+        CREATE TABLE IF NOT EXISTS sources (
+            id TEXT PRIMARY KEY,
+            notebook_id TEXT NOT NULL,
+            url TEXT,
+            title TEXT,
+            content TEXT,
+            summary TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE
+        )
+    """)
 
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS notes (
-        id TEXT PRIMARY KEY,
-        notebook_id TEXT NOT NULL,
-        content TEXT,
-        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-        FOREIGN KEY (notebook_id) REFERENCES notebooks(id)
-    )
-""")
+        CREATE TABLE IF NOT EXISTS notes (
+            id TEXT PRIMARY KEY,
+            notebook_id TEXT NOT NULL,
+            content TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE
+        )
+    """)
 
     conn.commit()
+    cursor.close()
     conn.close()
+    print("[DB] Tables initialized successfully")

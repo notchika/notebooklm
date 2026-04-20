@@ -1,72 +1,104 @@
-import chromadb
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+import os
+from pinecone import Pinecone, ServerlessSpec
+from services.ollama_service import get_embedding
+from dotenv import load_dotenv
 
-chroma_client = chromadb.PersistentClient(path="./chroma_store")
-default_embedding_function = DefaultEmbeddingFunction()
+load_dotenv()
 
-def get_or_create_collection(notebook_id: str):
-    return chroma_client.get_or_create_collection(
-        name=f"notebook_{notebook_id}",
-        embedding_function=default_embedding_function,
-    )
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "notebooklm")
+
+# Initialize Pinecone
+pc = Pinecone(api_key=PINECONE_API_KEY)
+
+def get_index():
+    """Get or create Pinecone index"""
+    existing_indexes = [idx.name for idx in pc.list_indexes()]
+    if PINECONE_INDEX_NAME not in existing_indexes:
+        pc.create_index(
+            name=PINECONE_INDEX_NAME,
+            dimension=768,
+            metric="cosine",
+            spec=ServerlessSpec(cloud="aws", region="us-east-1")
+        )
+    return pc.Index(PINECONE_INDEX_NAME)
 
 async def add_chunks(notebook_id: str, source_id: str, chunks: list[str]):
-    collection = get_or_create_collection(notebook_id)
+    """Embed and store chunks in Pinecone"""
+    index = get_index()
+    vectors = []
 
-    collection.add(
-        documents=chunks,
-        ids=[f"{source_id}_chunk_{i}" for i in range(len(chunks))],
-        metadatas=[{"source_id": source_id} for _ in chunks]
+    for i, chunk in enumerate(chunks):
+        embedding = await get_embedding(chunk)
+        vectors.append({
+            "id": f"{source_id}_chunk_{i}",
+            "values": embedding,
+            "metadata": {
+                "notebook_id": notebook_id,
+                "source_id": source_id,
+                "text": chunk[:1000]  # Store chunk text in metadata
+            }
+        })
+
+    # Upsert in batches of 100
+    batch_size = 100
+    for i in range(0, len(vectors), batch_size):
+        batch = vectors[i:i + batch_size]
+        index.upsert(vectors=batch, namespace=notebook_id)
+
+    print(f"[Pinecone] Stored {len(vectors)} chunks for source {source_id}")
+
+async def query_chunks(notebook_id: str, query: str, n_results: int = 8) -> list[str]:
+    """Query Pinecone for relevant chunks"""
+    index = get_index()
+    query_embedding = await get_embedding(query)
+
+    results = index.query(
+        vector=query_embedding,
+        top_k=n_results,
+        namespace=notebook_id,
+        include_metadata=True
     )
 
-async def query_chunks(notebook_id: str, query: str, n_results: int = 5) -> list[str]:
-    collection = get_or_create_collection(notebook_id)
-    results = collection.query(
-        query_texts=[query],
-        n_results=n_results
-    )
-    return results["documents"][0]
+    return [match.metadata["text"] for match in results.matches]
 
-async def query_chunks_with_metadata(notebook_id: str, query: str, n_results: int = 5):
+async def query_chunks_with_metadata(notebook_id: str, query: str, n_results: int = 8):
+    """Query Pinecone and return chunks with source info"""
     from db.database import get_connection
 
-    collection = get_or_create_collection(notebook_id)
+    index = get_index()
+    query_embedding = await get_embedding(query)
 
-    try:
-        count = collection.count()
-        actual_n = min(n_results, count)
-        if actual_n == 0:
-            return []
+    results = index.query(
+        vector=query_embedding,
+        top_k=n_results,
+        namespace=notebook_id,
+        include_metadata=True
+    )
 
-        results = collection.query(
-            query_texts=[query],
-            n_results=actual_n,
-            include=["documents", "metadatas"]
-        )
+    conn = get_connection()
+    enriched = []
+    for match in results.matches:
+        source_id = match.metadata.get("source_id", "")
+        chunk_text = match.metadata.get("text", "")
 
-        chunks = results["documents"][0]
-        metadatas = results["metadatas"][0]
+        source = conn.execute(
+            "SELECT title FROM sources WHERE id = ?", (source_id,)
+        ).fetchone()
+        title = source["title"] if source else "Unknown Source"
 
-        conn = get_connection()
-        enriched = []
-        for chunk, meta in zip(chunks, metadatas):
-            source_id = meta.get("source_id", "") if meta else ""
-            if source_id:
-                source = conn.execute(
-                    "SELECT title FROM sources WHERE id = ?", (source_id,)
-                ).fetchone()
-                title = source["title"] if source else "Unknown Source"
-            else:
-                # Fallback for chunks stored without metadata
-                title = "Source"
-            enriched.append({
-                "chunk": chunk,
-                "title": title,
-                "source_id": source_id
-            })
-        conn.close()
-        return enriched
+        enriched.append({
+            "chunk": chunk_text,
+            "title": title,
+            "source_id": source_id
+        })
+    conn.close()
+    return enriched
 
-    except Exception as e:
-        print(f"[ChromaDB] query error: {str(e)}")
-        raise
+async def delete_source_chunks(notebook_id: str, source_id: str):
+    """Delete all chunks for a source"""
+    index = get_index()
+    index.delete(
+        filter={"source_id": source_id},
+        namespace=notebook_id
+    )

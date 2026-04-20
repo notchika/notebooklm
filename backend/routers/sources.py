@@ -15,21 +15,10 @@ class URLInput(BaseModel):
     notebook_id: str
     url: str
 
-async def process_and_store(
-    notebook_id: str,
-    title: str,
-    content: str,
-    url: str = ""
-):
+async def process_and_store(notebook_id: str, title: str, content: str, url: str = ""):
     source_id = str(uuid.uuid4())
     chunks = chunk_text(content)
-    chunks_stored = 0
-    try:
-        await add_chunks(notebook_id, source_id, chunks)
-        chunks_stored = len(chunks)
-    except Exception as e:
-        # Source should still be stored even when vector indexing fails.
-        print(f"[Sources] Vector indexing failed for {source_id}: {str(e)}")
+    await add_chunks(notebook_id, source_id, chunks)
 
     try:
         summary = await generate_summary(content)
@@ -37,42 +26,34 @@ async def process_and_store(
         summary = "Summary unavailable"
 
     conn = get_connection()
-    conn.execute(
-        "INSERT INTO sources (id, notebook_id, url, title, content, summary) VALUES (?, ?, ?, ?, ?, ?)",
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO sources (id, notebook_id, url, title, content, summary) VALUES (%s, %s, %s, %s, %s, %s)",
         (source_id, notebook_id, url, title, content, summary)
     )
     conn.commit()
+    cur.close()
     conn.close()
 
     return {
         "source_id": source_id,
         "title": title,
         "summary": summary,
-        "chunks_stored": chunks_stored
+        "chunks_stored": len(chunks)
     }
-
-# ── URL Source ─────────────────────────────────────────
 
 @router.post("/url")
 async def add_url_source(data: URLInput):
-    # Check if YouTube URL
     if "youtube.com" in data.url or "youtu.be" in data.url:
         try:
-            from services.youtube_service import get_youtube_transcript
             scraped = get_youtube_transcript(data.url)
         except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to get YouTube transcript: {str(e)}"
-            )
+            raise HTTPException(status_code=400, detail=f"Failed to get YouTube transcript: {str(e)}")
     else:
         try:
             scraped = scrape_url(data.url)
         except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to scrape URL: {str(e)}"
-            )
+            raise HTTPException(status_code=400, detail=f"Failed to scrape URL: {str(e)}")
 
     return await process_and_store(
         notebook_id=data.notebook_id,
@@ -81,57 +62,31 @@ async def add_url_source(data: URLInput):
         url=data.url
     )
 
-# ── File Upload ────────────────────────────────────────
-
 @router.post("/file")
-async def add_file_source(
-    notebook_id: str = Form(...),
-    file: UploadFile = File(...)
-):
+async def add_file_source(notebook_id: str = Form(...), file: UploadFile = File(...)):
     file_bytes = await file.read()
-    max_size_bytes = 10 * 1024 * 1024  # 10MB
-    if len(file_bytes) > max_size_bytes:
-        raise HTTPException(
-            status_code=400,
-            detail="File is too large. Please upload files up to 10MB."
-        )
-
     filename = file.filename or "Untitled"
-    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    extension = filename.split(".")[-1].lower()
 
     try:
         if extension == "pdf":
             content = parse_pdf(file_bytes)
             title = filename.replace(".pdf", "")
-        elif extension == "docx":
+        elif extension in ["docx", "doc"]:
             content = parse_docx(file_bytes)
-            title = filename.replace(".docx", "")
-        elif extension == "doc":
-            raise HTTPException(
-                status_code=400,
-                detail="Unsupported file type: .doc. Please convert to .docx and upload again."
-            )
+            title = filename.replace(".docx", "").replace(".doc", "")
         elif extension == "txt":
             content = parse_txt(file_bytes)
             title = filename.replace(".txt", "")
         else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: .{extension}. Supported: PDF, DOCX, TXT"
-            )
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: .{extension}")
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to parse file: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
 
     if not content or len(content) < 50:
-        raise HTTPException(
-            status_code=400,
-            detail="File appears to be empty or unreadable"
-        )
+        raise HTTPException(status_code=400, detail="File appears to be empty or unreadable")
 
     return await process_and_store(
         notebook_id=notebook_id,
@@ -140,14 +95,15 @@ async def add_file_source(
         url=""
     )
 
-# ── Get Sources ────────────────────────────────────────
-
 @router.get("/{notebook_id}")
 def get_sources(notebook_id: str):
     conn = get_connection()
-    sources = conn.execute(
-        "SELECT id, title, url, summary, created_at FROM sources WHERE notebook_id = ?",
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, title, url, summary, created_at FROM sources WHERE notebook_id = %s",
         (notebook_id,)
-    ).fetchall()
+    )
+    sources = cur.fetchall()
+    cur.close()
     conn.close()
     return [dict(s) for s in sources]
