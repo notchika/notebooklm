@@ -5,8 +5,8 @@ from services.huggingface_service import get_embedding
 
 load_dotenv()
 
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "notebooklm")
+PINECONE_API_KEY = os.getenv(PINECONE_API_KEY)
+PINECONE_INDEX_NAME = os.getenv(PINECONE_INDEX_NAME, notebooklm)
 
 pc = Pinecone(api_key=PINECONE_API_KEY)
 
