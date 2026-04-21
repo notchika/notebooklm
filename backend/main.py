@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from db.database import init_db
 from routers import notebooks, sources, chat
-import os
 
 app = FastAPI(title="NotebookLM Clone", version="1.0.0")
 
