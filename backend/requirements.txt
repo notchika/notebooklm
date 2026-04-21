@@ -1,16 +1,14 @@
 fastapi
 uvicorn
 python-dotenv
-python-multipart
 httpx
 beautifulsoup4
 requests
 pydantic
 groq
-PyMuPDF
+pymupdf
 python-docx
 youtube-transcript-api
 pinecone
-supabase
 psycopg2-binary
 huggingface-hub
