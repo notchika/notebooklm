@@ -16,24 +16,39 @@ class URLInput(BaseModel):
     url: str
 
 async def process_and_store(notebook_id: str, title: str, content: str, url: str = ""):
+    print(f"[Store] Starting for: {title}")
     source_id = str(uuid.uuid4())
     chunks = chunk_text(content)
-    await add_chunks(notebook_id, source_id, chunks)
+    print(f"[Store] Created {len(chunks)} chunks")
+    
+    try:
+        await add_chunks(notebook_id, source_id, chunks)
+        print(f"[Store] Chunks stored in Pinecone")
+    except Exception as e:
+        print(f"[Store] Pinecone error: {str(e)}")
+        raise Exception(f"Vector storage failed: {str(e)}")
 
     try:
         summary = await generate_summary(content)
-    except Exception:
+        print(f"[Store] Summary generated")
+    except Exception as e:
+        print(f"[Store] Summary error: {str(e)}")
         summary = "Summary unavailable"
 
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO sources (id, notebook_id, url, title, content, summary) VALUES (%s, %s, %s, %s, %s, %s)",
-        (source_id, notebook_id, url, title, content, summary)
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO sources (id, notebook_id, url, title, content, summary) VALUES (%s, %s, %s, %s, %s, %s)",
+            (source_id, notebook_id, url, title, content, summary)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"[Store] Saved to database")
+    except Exception as e:
+        print(f"[Store] Database error: {str(e)}")
+        raise Exception(f"Database storage failed: {str(e)}")
 
     return {
         "source_id": source_id,
@@ -44,23 +59,35 @@ async def process_and_store(notebook_id: str, title: str, content: str, url: str
 
 @router.post("/url")
 async def add_url_source(data: URLInput):
+    print(f"[Sources] Adding URL: {data.url}")
+    print(f"[Sources] Notebook ID: {data.notebook_id}")
+    
     if "youtube.com" in data.url or "youtu.be" in data.url:
         try:
             scraped = get_youtube_transcript(data.url)
         except Exception as e:
+            print(f"[Sources] YouTube error: {str(e)}")
             raise HTTPException(status_code=400, detail=f"Failed to get YouTube transcript: {str(e)}")
     else:
         try:
             scraped = scrape_url(data.url)
+            print(f"[Sources] Scraped: {scraped['title']}")
         except Exception as e:
+            print(f"[Sources] Scraping error: {str(e)}")
             raise HTTPException(status_code=400, detail=f"Failed to scrape URL: {str(e)}")
 
-    return await process_and_store(
-        notebook_id=data.notebook_id,
-        title=scraped["title"],
-        content=scraped["content"],
-        url=data.url
-    )
+    try:
+        result = await process_and_store(
+            notebook_id=data.notebook_id,
+            title=scraped["title"],
+            content=scraped["content"],
+            url=data.url
+        )
+        print(f"[Sources] Success: {result}")
+        return result
+    except Exception as e:
+        print(f"[Sources] Process error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 @router.post("/file")
 async def add_file_source(notebook_id: str = Form(...), file: UploadFile = File(...)):
