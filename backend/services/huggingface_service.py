@@ -5,65 +5,61 @@ from dotenv import load_dotenv
 load_dotenv()
 
 HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
-EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
-# Updated API URL format
-HF_API_URL = f"https://api-inference.huggingface.co/models/{EMBEDDING_MODEL}"
+HF_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
 
 async def get_embedding(text: str) -> list[float]:
-    """Get embeddings from HuggingFace API"""
-    # Truncate to avoid token limits
     text = text[:512]
-
-    headers = {
-        "Authorization": f"Bearer {HF_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     payload = {
         "inputs": text,
-        "options": {
-            "wait_for_model": True,
-            "use_cache": True
-        }
+        "options": {"wait_for_model": True}
     }
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            HF_API_URL,
-            headers=headers,
-            json=payload
-        )
+    import asyncio
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    HF_API_URL,
+                    headers=headers,
+                    json=payload
+                )
+                print(f"[HF] Status: {response.status_code}")
+                print(f"[HF] Response: {response.text[:200]}")
 
-        # If model is loading, wait and retry
-        if response.status_code == 503:
-            import asyncio
-            print("[HF] Model loading, waiting 20 seconds...")
-            await asyncio.sleep(20)
-            response = await client.post(
-                HF_API_URL,
-                headers=headers,
-                json=payload
-            )
+                if response.status_code == 503:
+                    wait_time = 20 * (attempt + 1)
+                    print(f"[HF] Model loading, waiting {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
 
-        response.raise_for_status()
-        result = response.json()
+                response.raise_for_status()
+                result = response.json()
 
-        print(f"[HF] Response type: {type(result)}, length: {len(result) if isinstance(result, list) else 'N/A'}")
+                if isinstance(result, list):
+                    if isinstance(result[0], float):
+                        return result
+                    if isinstance(result[0], list):
+                        if isinstance(result[0][0], float):
+                            dim = len(result[0])
+                            return [
+                                sum(result[t][d] for t in range(len(result))) / len(result)
+                                for d in range(dim)
+                            ]
+                        if isinstance(result[0][0], list):
+                            tokens = result[0]
+                            dim = len(tokens[0])
+                            return [
+                                sum(tokens[t][d] for t in range(len(tokens))) / len(tokens)
+                                for d in range(dim)
+                            ]
 
-        # Handle different response formats
-        if isinstance(result, list):
-            # If it's a list of lists (batch), take first item
-            if len(result) > 0 and isinstance(result[0], list):
-                return result[0]
-            # If it's already a flat list of floats
-            if len(result) > 0 and isinstance(result[0], float):
-                return result
-            # If nested deeper
-            if len(result) > 0 and isinstance(result[0], list):
-                if isinstance(result[0][0], list):
-                    # Mean pooling
-                    vectors = result[0]
-                    return [
-                        sum(v[i] for v in vectors) / len(vectors)
-                        for i in range(len(vectors[0]))
-                    ]
-        raise Exception(f"Unexpected HF response format: {type(result)}, value: {str(result)[:200]}")
+                raise Exception(f"Unexpected format: {str(result)[:100]}")
+
+        except Exception as e:
+            print(f"[HF] Attempt {attempt + 1} failed: {str(e)}")
+            if attempt == 2:
+                raise
+            await asyncio.sleep(5)
+
+    raise Exception("All embedding attempts failed")
