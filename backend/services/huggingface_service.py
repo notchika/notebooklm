@@ -1,23 +1,39 @@
+import httpx
 import os
-from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+JINA_API_KEY = os.getenv("JINA_API_KEY", "")
+JINA_EMBED_URL = "https://api.jina.ai/v1/embeddings"
 
 async def get_embedding(text: str) -> list[float]:
-    """Get embeddings using Groq's embedding model"""
+    """Get embeddings using Jina AI — free tier, no install needed"""
     text = text[:512]
-    
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {JINA_API_KEY}" if JINA_API_KEY else ""
+    }
+
+    payload = {
+        "input": [text],
+        "model": "jina-embeddings-v2-base-en"
+    }
+
     try:
-        response = client.embeddings.create(
-            model="nomic-embed-text",
-            input=text,
-        )
-        embedding = response.data[0].embedding
-        print(f"[Groq Embed] Success, dimension: {len(embedding)}")
-        return embedding
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                JINA_EMBED_URL,
+                headers=headers,
+                json=payload
+            )
+            print(f"[Jina Embed] Status: {response.status_code}")
+            response.raise_for_status()
+            result = response.json()
+            embedding = result["data"][0]["embedding"]
+            print(f"[Jina Embed] Success, dimension: {len(embedding)}")
+            return embedding
     except Exception as e:
-        print(f"[Groq Embed] Error: {str(e)}")
-        raise Exception(f"Embedding failed: {str(e)}")
+        print(f"[Jina Embed] Error: {str(e)}")
+        raise Exception(f"Jina embedding failed: {str(e)}")
