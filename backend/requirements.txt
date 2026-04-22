@@ -12,4 +12,3 @@ python-docx
 youtube-transcript-api
 pinecone
 psycopg2-binary
-huggingface-hub
