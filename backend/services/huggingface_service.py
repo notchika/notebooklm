@@ -5,15 +5,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
-HF_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+
+# New correct URL format for HuggingFace embeddings
+HF_API_URL = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
 
 async def get_embedding(text: str) -> list[float]:
     text = text[:512]
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {
-        "inputs": text,
-        "options": {"wait_for_model": True}
+    headers = {
+        "Authorization": f"Bearer {HF_API_KEY}",
+        "Content-Type": "application/json"
     }
+    payload = {"inputs": [text]}
 
     import asyncio
     for attempt in range(3):
@@ -25,29 +27,33 @@ async def get_embedding(text: str) -> list[float]:
                     json=payload
                 )
                 print(f"[HF] Status: {response.status_code}")
-                print(f"[HF] Response: {response.text[:200]}")
+                print(f"[HF] Response preview: {response.text[:200]}")
 
                 if response.status_code == 503:
-                    wait_time = 20 * (attempt + 1)
-                    print(f"[HF] Model loading, waiting {wait_time}s...")
-                    await asyncio.sleep(wait_time)
+                    print(f"[HF] Model loading, waiting 20s...")
+                    await asyncio.sleep(20)
                     continue
+
+                if response.status_code == 404:
+                    print(f"[HF] 404 - trying alternative URL...")
+                    raise Exception("404 Not Found")
 
                 response.raise_for_status()
                 result = response.json()
+                print(f"[HF] Result type: {type(result)}, len: {len(result)}")
 
+                # New API returns list of embeddings (one per input)
+                # Since we send one text, take first embedding
                 if isinstance(result, list):
-                    if isinstance(result[0], float):
+                    first = result[0]
+                    if isinstance(first, float):
                         return result
-                    if isinstance(result[0], list):
-                        if isinstance(result[0][0], float):
-                            dim = len(result[0])
-                            return [
-                                sum(result[t][d] for t in range(len(result))) / len(result)
-                                for d in range(dim)
-                            ]
-                        if isinstance(result[0][0], list):
-                            tokens = result[0]
+                    if isinstance(first, list):
+                        if isinstance(first[0], float):
+                            return first  # Return first embedding
+                        if isinstance(first[0], list):
+                            # Mean pool token embeddings
+                            tokens = first
                             dim = len(tokens[0])
                             return [
                                 sum(tokens[t][d] for t in range(len(tokens))) / len(tokens)
