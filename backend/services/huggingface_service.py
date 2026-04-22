@@ -12,7 +12,7 @@ async def get_embedding(text: str) -> list[float]:
     
     try:
         response = client.embeddings.create(
-            model="nomic-embed-text-v1_5",
+            model="nomic-embed-text",
             input=text,
         )
         embedding = response.data[0].embedding
